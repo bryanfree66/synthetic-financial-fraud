@@ -1,0 +1,54 @@
+name: Get fraud data
+inputs:
+- {name: url, type: String}
+outputs:
+- {name: dataset_train, type: Dataset}
+- {name: dataset_test, type: Dataset}
+implementation:
+  container:
+    image: us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==2.4.0' 'kfp==1.8.13' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - |2+
+
+      import kfp
+      from kfp.v2 import dsl
+      from kfp.v2.dsl import *
+      from typing import *
+
+      def get_fraud_data(
+          url: str,
+          dataset_train: Output[Dataset],
+          dataset_test: Output[Dataset]
+      ):
+          import pandas as pd
+          import numpy as np
+          from sklearn.model_selection import train_test_split as tts
+
+          df_fraud = pd.read_csv(url)
+          df_fraud.drop(['nameOrig','nameDest','isFlaggedFraud'],axis=1,inplace=True)
+          X = pd.concat([df_fraud.drop('type', axis=1), pd.get_dummies(df['type'])], axis=1)
+
+          train, test = tts(X, test_size=0.3)
+          train.to_csv(dataset_train.path + ".csv" , index=False, encoding='utf-8-sig')
+          test.to_csv(dataset_test.path + ".csv" , index=False, encoding='utf-8-sig')
+
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - get_fraud_data
