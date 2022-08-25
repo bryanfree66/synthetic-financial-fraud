@@ -6,7 +6,7 @@ outputs:
 - {name: dataset_test, type: Dataset}
 implementation:
   container:
-    image: us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest
+    image: python:3.9
     command:
     - sh
     - -c
@@ -16,7 +16,7 @@ implementation:
           python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
       fi
 
-      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==2.4.0' 'kfp==1.8.13' && "$0" "$@"
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==1.0.2' 'fsspec' 'gcsfs' 'kfp==1.8.13' && "$0" "$@"
     - sh
     - -ec
     - |
@@ -33,17 +33,24 @@ implementation:
       def get_fraud_data(
           url: str,
           dataset_train: Output[Dataset],
-          dataset_test: Output[Dataset]
+          dataset_test: Output[Dataset],
       ):
           import pandas as pd
           import numpy as np
           from sklearn.model_selection import train_test_split as tts
+          from google.cloud import storage
 
+          print("reading the csv")
           df_fraud = pd.read_csv(url)
-          df_fraud.drop(['nameOrig','nameDest','isFlaggedFraud'],axis=1,inplace=True)
-          X = pd.concat([df_fraud.drop('type', axis=1), pd.get_dummies(df['type'])], axis=1)
 
-          train, test = tts(X, test_size=0.3)
+          print("dropping columns and getting dummies")
+          df_fraud.drop(['nameOrig','nameDest','isFlaggedFraud'],axis=1,inplace=True)
+          df_fraud = pd.concat([df_fraud.drop('type', axis=1), pd.get_dummies(df_fraud['type'])], axis=1)
+
+          print("creating test train split")
+          train, test = tts(df_fraud, test_size = 0.3,random_state=42, shuffle=False)
+
+          print("creating csvs")
           train.to_csv(dataset_train.path + ".csv" , index=False, encoding='utf-8-sig')
           test.to_csv(dataset_test.path + ".csv" , index=False, encoding='utf-8-sig')
 

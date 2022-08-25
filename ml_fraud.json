@@ -212,9 +212,9 @@
               "sh",
               "-ec",
               "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef deploy_fraud_model(\n    model: Input[Model],\n    project: str,\n    region: str,\n    serving_container_image_uri : str, \n    vertex_endpoint: Output[Artifact],\n    vertex_model: Output[Model]\n):\n    from google.cloud import aiplatform\n    aiplatform.init(project=project, location=region)\n\n    DISPLAY_NAME  = \"financial-fraud-synthetic\"\n    MODEL_NAME = \"financial-fraud\"\n    ENDPOINT_NAME = \"financial-fraud-ep1\"\n\n    def create_endpoint():\n        endpoints = aiplatform.Endpoint.list(\n        filter='display_name=\"{}\"'.format(ENDPOINT_NAME),\n        order_by='create_time desc',\n        project=project, \n        location=region,\n        )\n        if len(endpoints) > 0:\n            endpoint = endpoints[0]  # most recently created\n        else:\n            endpoint = aiplatform.Endpoint.create(\n            display_name=ENDPOINT_NAME, project=project, location=region\n        )\n    endpoint = create_endpoint()   \n\n\n    #Import a model programmatically\n    model_upload = aiplatform.Model.upload(\n        display_name = DISPLAY_NAME, \n        artifact_uri = model.uri.replace(\"model\", \"\"),\n        serving_container_image_uri =  serving_container_image_uri,\n        serving_container_health_route=f\"/v1/models/{MODEL_NAME}\",\n        serving_container_predict_route=f\"/v1/models/{MODEL_NAME}:predict\",\n        serving_container_environment_variables={\n        \"MODEL_NAME\": MODEL_NAME,\n    },       \n    )\n    model_deploy = model_upload.deploy(\n        machine_type=\"n1-standard-4\", \n        endpoint=endpoint,\n        traffic_split={\"0\": 100},\n        deployed_model_display_name=DISPLAY_NAME,\n    )\n\n    # Save data to the output params\n    vertex_model.uri = model_deploy.resource_name\n\n"
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef deploy_fraud_model(\n    model: Input[Model],\n    project: str,\n    region: str,\n    serving_container_image_uri : str, \n    vertex_endpoint: Output[Artifact],\n    vertex_model: Output[Model]\n):\n    from google.cloud import aiplatform\n    aiplatform.init(project=project, location=region)\n\n    DISPLAY_NAME  = \"financial-fraud-synthetic\"\n    MODEL_NAME = \"financial-fraud\"\n    ENDPOINT_NAME = \"financial-fraud-ep2\"\n\n    def create_endpoint():\n        print('Creating endpoint')\n        endpoints = aiplatform.Endpoint.list(\n        filter='display_name=\"{}\"'.format(ENDPOINT_NAME),\n        order_by='create_time desc',\n        project=project, \n        location=region,\n        )\n        if len(endpoints) > 0:\n            endpoint = endpoints[0]  # most recently created\n        else:\n            endpoint = aiplatform.Endpoint.create(\n            display_name=ENDPOINT_NAME, project=project, location=region\n        )\n    endpoint = create_endpoint() \n    print('Endpoint created')\n\n\n    #Import a model programmatically\n    print('Uploading model to endpoint')\n    model_upload = aiplatform.Model.upload(\n        display_name = DISPLAY_NAME, \n        artifact_uri = model.uri.replace(\"model\", \"\"),\n        serving_container_image_uri =  serving_container_image_uri,\n        serving_container_health_route=f\"/v1/models/{MODEL_NAME}\",\n        serving_container_predict_route=f\"/v1/models/{MODEL_NAME}:predict\",\n        serving_container_environment_variables={\n        \"MODEL_NAME\": MODEL_NAME,\n    },       \n    )\n    model_deploy = model_upload.deploy(\n        machine_type=\"n1-standard-4\", \n        endpoint=endpoint,\n        traffic_split={\"0\": 100},\n        deployed_model_display_name=DISPLAY_NAME,\n    )\n    print('Model deployed')\n\n    # Save data to the output params\n    print('Saving model output params')\n    vertex_model.uri = model_deploy.resource_name\n\n"
             ],
-            "image": "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.0-24:latest"
+            "image": "python:3.9"
           }
         },
         "exec-fraud-evaluation": {
@@ -228,11 +228,11 @@
             "command": [
               "sh",
               "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'sklearn' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'scikit-learn==1.0.2' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
               "sh",
               "-ec",
               "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef fraud_evaluation(\n    test_set:  Input[Dataset],\n    rf_fraud_model: Input[Model],\n    thresholds_dict_str: str,\n    metrics: Output[ClassificationMetrics],\n    kpi: Output[Metrics]\n) -> NamedTuple(\"output\", [(\"deploy\", str)]):\n\n    from sklearn.ensemble import RandomForestClassifier\n    import pandas as pd\n    import logging \n    import pickle\n    from sklearn.metrics import roc_curve, confusion_matrix, accuracy_score\n    import json\n    import typing\n\n\n    def threshold_check(val1, val2):\n        cond = \"false\"\n        if val1 >= val2 :\n            cond = \"true\"\n        return cond\n\n    data = pd.read_csv(test_set.path+\".csv\")\n    model = RandomForestClassifier()\n    file_name = rf_winequality_model.path + \".pkl\"\n    with open(file_name, 'rb') as file:  \n        model = pickle.load(file)\n\n    y_test = data.drop(columns=[\"target\"])\n    y_target=data.target\n    y_pred = model.predict(y_test)\n\n\n    y_scores =  model.predict_proba(data.drop(columns=[\"target\"]))[:, 1]\n    fpr, tpr, thresholds = roc_curve(\n         y_true=data.target.to_numpy(), y_score=y_scores, pos_label=True\n    )\n    metrics.log_roc_curve(fpr.tolist(), tpr.tolist(), thresholds.tolist())  \n\n    metrics.log_confusion_matrix(\n       [\"False\", \"True\"],\n       confusion_matrix(\n           data.target, y_pred\n       ).tolist(), \n    )\n\n    accuracy = accuracy_score(data.target, y_pred.round())\n    thresholds_dict = json.loads(thresholds_dict_str)\n    rf_fraud_model.metadata[\"accuracy\"] = float(accuracy)\n    kpi.log_metric(\"accuracy\", float(accuracy))\n    deploy = threshold_check(float(accuracy), int(thresholds_dict['roc']))\n    return (deploy,)\n\n"
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef fraud_evaluation(\n    test_set:  Input[Dataset],\n    rf_fraud_model: Input[Model],\n    thresholds_dict_str: str,\n    metrics: Output[ClassificationMetrics],\n    kpi: Output[Metrics]\n) -> NamedTuple(\"output\", [(\"deploy\", str)]):\n\n    from sklearn.ensemble import RandomForestClassifier\n    import pandas as pd\n    import logging \n    import pickle\n    from sklearn.metrics import roc_curve, confusion_matrix, accuracy_score\n    import json\n    import typing\n\n\n    def threshold_check(val1, val2):\n        cond = \"false\"\n        if val1 >= val2 :\n            cond = \"true\"\n        return cond\n\n    print(\"Getting test data\")\n    data = pd.read_csv(test_set.path+\".csv\")\n\n    print(\"restoring the model\")\n    model = RandomForestClassifier()\n    file_name = rf_fraud_model.path + \".pkl\"\n    with open(file_name, 'rb') as file:  \n        model = pickle.load(file)\n    print(\"model restored\")\n\n    print(\"prepping the data\")\n    y_test = data[\"isFraud\"]\n    X_test = data.drop('isFraud', axis=1)\n\n\n    print(\"running prediction\")\n    y_pred = model.predict(X_test)\n\n    print(\"Making test predictions\")\n    y_scores = model.predict_proba(X_test)[:, 1]\n\n    print(\"Getting ROC\")\n    fpr, tpr, thresholds = roc_curve(\n         y_true=data['isFraud'].to_numpy(), y_score=y_scores, pos_label=True\n    )\n    metrics.log_roc_curve(fpr.tolist(), tpr.tolist(), thresholds.tolist())  \n\n    print(\"Getting confusion matrix\")\n    metrics.log_confusion_matrix(\n       [\"False\", \"True\"],\n       confusion_matrix(\n           data['isFraud'], y_pred\n       ).tolist(), \n    )\n\n    print(\"Checking Accuracy\")\n    accuracy = accuracy_score(data['isFraud'], y_pred.round())\n    thresholds_dict = json.loads(thresholds_dict_str)\n    rf_fraud_model.metadata[\"accuracy\"] = float(accuracy)\n    kpi.log_metric(\"accuracy\", float(accuracy))\n    deploy = threshold_check(float(accuracy), int(thresholds_dict['roc']))\n    return (deploy,)\n\n"
             ],
             "image": "python:3.9"
           }
@@ -248,13 +248,13 @@
             "command": [
               "sh",
               "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==2.4.0' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==1.0.2' 'fsspec' 'gcsfs' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
               "sh",
               "-ec",
               "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef get_fraud_data(\n    url: str,\n    dataset_train: Output[Dataset],\n    dataset_test: Output[Dataset]\n):\n    import pandas as pd\n    import numpy as np\n    from sklearn.model_selection import train_test_split as tts\n\n    df_fraud = pd.read_csv(url)\n    df_fraud.drop(['nameOrig','nameDest','isFlaggedFraud'],axis=1,inplace=True)\n    X = pd.concat([df_fraud.drop('type', axis=1), pd.get_dummies(df['type'])], axis=1)\n\n    train, test = tts(X, test_size=0.3)\n    train.to_csv(dataset_train.path + \".csv\" , index=False, encoding='utf-8-sig')\n    test.to_csv(dataset_test.path + \".csv\" , index=False, encoding='utf-8-sig')\n\n"
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef get_fraud_data(\n    url: str,\n    dataset_train: Output[Dataset],\n    dataset_test: Output[Dataset],\n):\n    import pandas as pd\n    import numpy as np\n    from sklearn.model_selection import train_test_split as tts\n    from google.cloud import storage\n\n    print(\"reading the csv\")\n    df_fraud = pd.read_csv(url)\n\n    print(\"dropping columns and getting dummies\")\n    df_fraud.drop(['nameOrig','nameDest','isFlaggedFraud'],axis=1,inplace=True)\n    df_fraud = pd.concat([df_fraud.drop('type', axis=1), pd.get_dummies(df_fraud['type'])], axis=1)\n\n    print(\"creating test train split\")\n    train, test = tts(df_fraud, test_size = 0.3,random_state=42, shuffle=False)\n\n    print(\"creating csvs\")\n    train.to_csv(dataset_train.path + \".csv\" , index=False, encoding='utf-8-sig')\n    test.to_csv(dataset_test.path + \".csv\" , index=False, encoding='utf-8-sig')\n\n"
             ],
-            "image": "us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest"
+            "image": "python:3.9"
           }
         },
         "exec-train-fraud-model": {
@@ -268,11 +268,11 @@
             "command": [
               "sh",
               "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'sklearn' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
+              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'scikit-learn==1.0.2' 'kfp==1.8.13' && \"$0\" \"$@\"\n",
               "sh",
               "-ec",
               "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef train_fraud_model(\n    dataset:  Input[Dataset],\n    model: Output[Model], \n):\n\n    from sklearn.ensemble import RandomForestClassifier\n    import pandas as pd\n    import pickle\n\n\n    data = pd.read_csv(dataset.path+\".csv\")\n    model_rf = RandomForestClassifier(n_estimators=120)\n    model_rf.fit(\n        data.drop(columns=[\"target\"]),\n        data.target,\n    )\n    model.metadata[\"framework\"] = \"RF\"\n    file_name = model.path + f\".pkl\"\n    with open(file_name, 'wb') as file:  \n        pickle.dump(model_rf, file)\n\n"
+              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef train_fraud_model(\n    dataset:  Input[Dataset],\n    model: Output[Model], \n):\n\n    from sklearn.ensemble import RandomForestClassifier\n    import pandas as pd\n    import pickle\n\n    print(\"reading the dataset\")\n    data = pd.read_csv(dataset.path+\".csv\")\n\n    print(\"getting the labels\")\n    y_train = data[\"isFraud\"]\n\n    print(\"dropping the targets\")\n    X_train = data.drop('isFraud', axis=1)\n\n    print(\"creating the model\")\n    model_rf = RandomForestClassifier(n_estimators=120)\n\n    print(\"Fitting the model\")\n    model_rf.fit(X_train,y_train)\n    print(\"Finished fitting the model\")\n\n    print(\"Creating PKL\")\n    model.metadata[\"framework\"] = \"RF\"\n    file_name = model.path + f\".pkl\"\n    with open(file_name, 'wb') as file:  \n        pickle.dump(model_rf, file)\n\n"
             ],
             "image": "python:3.9"
           }
@@ -473,7 +473,7 @@
     "sdkVersion": "kfp-1.8.13"
   },
   "runtimeConfig": {
-    "gcsOutputDirectory": "gs://cloud-ai-platform-8c917cf7-47f7-4746-a08e-dd04ba7091af/pipelines/",
+    "gcsOutputDirectory": "gs://cloud-ai-platform-837ad179-119c-4d56-a742-82ec7aaa2cae/pipelines/",
     "parameters": {
       "api_endpoint": {
         "stringValue": "us-central1-aiplatform.googleapis.com"
@@ -482,19 +482,19 @@
         "stringValue": "financial-fraud-synthetic"
       },
       "project": {
-        "stringValue": "bryanfreeman-267-2022081619260"
+        "stringValue": "bq-experiments-350102"
       },
       "region": {
         "stringValue": "us-central1"
       },
       "serving_container_image_uri": {
-        "stringValue": "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.0-24:latest"
+        "stringValue": "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.0-23:latest"
       },
       "thresholds_dict_str": {
         "stringValue": "{\"roc\":0.8}"
       },
       "url": {
-        "stringValue": "gs://bryanfreeman-267-2022081619260/PS_20174392719_1491204439457_log.csv"
+        "stringValue": "gs://bq-experiments-datasets/fraud/synthetic-fraud.csv"
       }
     }
   }
